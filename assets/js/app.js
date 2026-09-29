@@ -12,6 +12,7 @@
 
 import { BleClient, friendlyError, isWebBluetoothSupported,
          isSecureContext, getBluetoothAvailability, normalizeOptionalServiceUuid } from './ble.js';
+import * as Auth from './auth.js';
 import { discoverServices, getCharacteristics, readCharacteristic,
          startNotifications, writeDiagnostic, getDescriptors, readDescriptor } from './gatt.js';
 import { demoDevices, connectDemo, DEMO_UUIDS } from './demo.js';
@@ -20,7 +21,7 @@ import { buildJsonReport, buildTextReport, download } from './export.js';
 import { $, $$, esc, el, toast, confirmModal, badge, kvRows,
          localTimestamp, Log } from './ui.js';
 
-const APP_VERSION = '1.2.1';
+const APP_VERSION = '1.3.0';
 
 /* ================= Estado da sessão ================= */
 
@@ -91,11 +92,18 @@ function optionalServicesFromSettings() {
 
 /* ================= Roteamento / navegação ================= */
 
-const SCREENS = ['home', 'scanner', 'devices', 'device', 'gatt', 'monitor',
+const SCREENS = ['lock', 'home', 'scanner', 'devices', 'device', 'gatt', 'monitor',
                  'diagnostic', 'history', 'settings', 'compat', 'permissions', 'privacy'];
+
+let accessUnlocked = false; // false enquanto o bloqueio local (PIN) estiver ativo
 
 function showScreen(name) {
   if (!SCREENS.includes(name)) return;
+  // Bloqueio local ativo: somente a tela de desbloqueio é acessível.
+  if (!accessUnlocked && name !== 'lock') return;
+  // Navegação oculta durante o bloqueio.
+  $('#bottomnav').classList.toggle('hidden', name === 'lock');
+  $('#sidebar')?.classList.toggle('hidden', name === 'lock');
   SCREENS.forEach((s) => $('#screen-' + s)?.classList.toggle('hidden', s !== name));
   $$('.nav-btn[data-screen]').forEach((b) =>
     b.classList.toggle('active', b.dataset.screen === name));
@@ -159,6 +167,105 @@ function renderHome() {
   const chars = state.services.reduce((a, s) => a + (s.characteristics?.length ?? 0), 0);
   $('#stat-chars').textContent = chars;
   $('#stat-lastdiag').textContent = state.lastDiagAt ? localTimestamp(state.lastDiagAt) : '—';
+}
+
+/* ================= Bloqueio local de acesso (PIN) ================= */
+
+const PIN_MAX_ATTEMPTS = 5;
+const PIN_COOLDOWN_MS = 30000;
+let pinAttempts = 0;
+let pinLockedUntil = 0;
+
+/** Verifica o PIN na tela de bloqueio. */
+async function unlock() {
+  const msg = $('#pin-msg');
+  const input = $('#pin-input');
+  if (Date.now() < pinLockedUntil) {
+    msg.textContent = `Aguarde ${Math.ceil((pinLockedUntil - Date.now()) / 1000)}s antes de tentar novamente.`;
+    return;
+  }
+  const pin = input.value.trim();
+  if (!pin) { msg.textContent = 'Informe o PIN de acesso.'; return; }
+  try {
+    const ok = await Auth.verifyPin(pin);
+    if (ok) {
+      pinAttempts = 0;
+      input.value = '';
+      msg.textContent = '';
+      accessUnlocked = true;
+      showScreen('home');
+      Log.add('Acesso desbloqueado (PIN local verificado)');
+    } else {
+      pinAttempts++;
+      input.value = '';
+      if (pinAttempts >= PIN_MAX_ATTEMPTS) {
+        pinLockedUntil = Date.now() + PIN_COOLDOWN_MS;
+        msg.textContent = `PIN incorreto. Aguarde ${PIN_COOLDOWN_MS / 1000}s para tentar novamente.`;
+        Log.add(`PIN incorreto — pausa de ${PIN_COOLDOWN_MS / 1000}s após ${pinAttempts} tentativas`);
+      } else {
+        msg.textContent = `PIN incorreto (${pinAttempts}/${PIN_MAX_ATTEMPTS}).`;
+        Log.add(`PIN incorreto (tentativa ${pinAttempts}/${PIN_MAX_ATTEMPTS})`);
+      }
+    }
+  } catch (err) {
+    msg.textContent = friendlyError(err).message;
+  }
+}
+
+/** Estado do card de bloqueio nas Configurações. */
+function renderPinStatus() {
+  const status = $('#pin-status');
+  if (!Auth.isSupported()) {
+    status.textContent = 'Crypto API indisponível neste contexto (requer HTTPS): bloqueio por PIN não disponível.';
+    $('#btn-pin-save').disabled = true;
+    $('#btn-pin-remove').disabled = true;
+    return;
+  }
+  const has = Auth.hasPin();
+  status.textContent = has
+    ? 'PIN de acesso: definido — exigido ao abrir o aplicativo neste dispositivo.'
+    : 'PIN de acesso: nenhum — o aplicativo abre sem bloqueio.';
+  $('#btn-pin-save').textContent = has ? 'Alterar PIN' : 'Definir PIN';
+  $('#btn-pin-remove').classList.toggle('hidden', !has);
+  $('#pin-current-wrap').classList.toggle('hidden', !has);
+}
+
+/** Define ou altera o PIN a partir das Configurações. */
+async function savePinFromSettings() {
+  if (!Auth.isSupported()) return;
+  const current = $('#set-pin-current').value.trim();
+  const a = $('#set-pin').value.trim();
+  const b = $('#set-pin2').value.trim();
+  const changing = Auth.hasPin();
+  if (changing) {
+    const ok = await Auth.verifyPin(current).catch(() => false);
+    if (!ok) { toast('PIN atual incorreto.', 'err'); return; }
+  }
+  if (a !== b) { toast('Os PINs informados não coincidem.', 'warn'); return; }
+  try {
+    await Auth.setupPin(a);
+    $('#set-pin-current').value = '';
+    $('#set-pin').value = '';
+    $('#set-pin2').value = '';
+    toast(changing ? 'PIN de acesso alterado.' : 'PIN de acesso definido.', 'ok');
+    Log.add(changing ? 'PIN de acesso alterado' : 'PIN de acesso definido');
+    renderPinStatus();
+  } catch (err) {
+    toast(friendlyError(err).message, 'warn', 5000);
+  }
+}
+
+/** Remove o PIN de acesso (com confirmação). */
+async function removePinFromSettings() {
+  if (!Auth.hasPin()) return;
+  const ok = await confirmModal('Remover PIN de acesso',
+    'O aplicativo passará a abrir sem bloqueio local neste dispositivo. Continuar?',
+    'Remover', true);
+  if (!ok) return;
+  Auth.removePin();
+  toast('PIN de acesso removido.', 'ok');
+  Log.add('PIN de acesso removido');
+  renderPinStatus();
 }
 
 /* ================= Compatibilidade do navegador ================= */
@@ -1247,6 +1354,10 @@ function bindGlobalEvents() {
   $('#btn-scan-home').addEventListener('click', () => { showScreen('scanner'); startScan(); });
   $('#btn-known').addEventListener('click', loadKnownDevices);
   $('#btn-passive').addEventListener('click', togglePassiveScan);
+  $('#btn-unlock').addEventListener('click', unlock);
+  $('#pin-input').addEventListener('keydown', (e) => { if (e.key === 'Enter') unlock(); });
+  $('#btn-pin-save').addEventListener('click', savePinFromSettings);
+  $('#btn-pin-remove').addEventListener('click', removePinFromSettings);
   $('#btn-known-home').addEventListener('click', async () => {
     showScreen('scanner');
     await loadKnownDevices();
@@ -1319,7 +1430,18 @@ async function init() {
   const passiveSupported = isWebBluetoothSupported() &&
     typeof navigator.bluetooth?.requestLEScan === 'function';
   $('#btn-passive').classList.toggle('hidden', !passiveSupported);
-  showScreen('home');
+  renderPinStatus();
+  // Bloqueio local: se há PIN definido, o app abre travado.
+  if (Auth.hasPin()) {
+    accessUnlocked = false;
+    showScreen('lock');
+    if (!Auth.isSupported()) {
+      $('#pin-msg').textContent = 'Crypto API indisponível neste contexto — abra o aplicativo por HTTPS para verificar o PIN.';
+    }
+  } else {
+    accessUnlocked = true;
+    showScreen('home');
+  }
   Log.add(`BLE Diagnostic Scanner v${APP_VERSION} iniciado`);
 
   // Service Worker (cache, offline e atualização controlada).

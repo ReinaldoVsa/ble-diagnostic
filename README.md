@@ -180,6 +180,23 @@ Navegadores **não expõem API alguma** para detectar redes Wi-Fi (nem SSID, nem
 
 Restrições inerentes: o Android exige consentimento do usuário (não há conexão invisível a redes novas) e redes protegidas nunca conectam sem credenciais, exceto quando já salvas no sistema.
 
+## Autenticação e bloqueio de acesso
+
+**Esta PWA não tem autenticação de servidor — e isso é dito com todas as letras.** A hospedagem (GitHub Pages) é estática, sem backend: qualquer "login" validado apenas no navegador é trivialmente contornável, e o projeto não mantém chaves secretas no frontend. Autenticação real (OAuth 2.0/OIDC, contas de usuário) pertence ao backend ou à versão nativa Android.
+
+O que existe desde a v1.3.0 é o **bloqueio local de acesso por PIN** (módulo `auth.js`):
+
+- PIN de 4–8 dígitos exigido ao abrir o aplicativo no dispositivo;
+- Armazenado apenas localmente (localStorage) como **hash PBKDF2-SHA256 com salt aleatório, 150.000 iterações** (Web Crypto) — o PIN nunca é gravado em texto puro e não vai a logs;
+- Navegação bloqueada até desbloquear; 5 tentativas incorretas ⇒ pausa de 30 s;
+- Alteração exige o PIN atual; remoção exige confirmação explícita;
+- Sem Crypto API (contexto não seguro): o bloqueio informa indisponibilidade — nunca simula.
+
+O que este bloqueio **não** é:
+- Não criptografa o histórico (IndexedDB continua legível no dispositivo);
+- Não protege contra alguém com acesso técnico ao aparelho (devtools);
+- Não substitui autenticação de servidor em cenário algum.
+
 ## Versão
 
-1.2.1
+1.3.0
