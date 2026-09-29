@@ -20,7 +20,7 @@ import { buildJsonReport, buildTextReport, download } from './export.js';
 import { $, $$, esc, el, toast, confirmModal, badge, kvRows,
          localTimestamp, Log } from './ui.js';
 
-const APP_VERSION = '1.1.0';
+const APP_VERSION = '1.2.0';
 
 /* ================= Estado da sessão ================= */
 
@@ -38,8 +38,11 @@ const state = {
   services: [],           // serviços descobertos
   notifications: [],     // eventos do monitor
   monitorPaused: false,
-  scanBusy: false
+  scanBusy: false,
+  reconnectAttempts: 0
 };
+
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 const ble = new BleClient((msg) => Log.add(msg));
 
@@ -89,7 +92,7 @@ function optionalServicesFromSettings() {
 /* ================= Roteamento / navegação ================= */
 
 const SCREENS = ['home', 'scanner', 'devices', 'device', 'gatt', 'monitor',
-                 'diagnostic', 'history', 'settings', 'permissions', 'privacy'];
+                 'diagnostic', 'history', 'settings', 'compat', 'permissions', 'privacy'];
 
 function showScreen(name) {
   if (!SCREENS.includes(name)) return;
@@ -106,6 +109,7 @@ function showScreen(name) {
   if (name === 'diagnostic') renderDiagnostic();
   if (name === 'history') renderHistory();
   if (name === 'settings') renderSettingsValues();
+  if (name === 'compat') renderCompat();
   window.scrollTo({ top: 0 });
 }
 
@@ -137,6 +141,9 @@ async function refreshCapabilities() {
   if (!supported) parts.push('Seu navegador não oferece Web Bluetooth. Utilize um navegador/dispositivo compatível (ex.: Chrome para Android).');
   if (!secure) parts.push('Web Bluetooth exige HTTPS.');
   if (settings.demoMode) parts.push('Modo demonstração ativo: a busca retorna apenas dispositivos DEMO fictícios.');
+  if (supported && secure && !settings.demoMode && typeof navigator.bluetooth?.requestLEScan === 'function') {
+    parts.push('Este navegador oferece varredura passiva experimental: "Iniciar busca" também a ativa automaticamente.');
+  }
   hint.textContent = parts.join(' ');
   hint.className = 'notice ' + (parts.length ? (supported && secure ? '' : 'notice-warn') : 'hidden');
 }
@@ -152,6 +159,35 @@ function renderHome() {
   const chars = state.services.reduce((a, s) => a + (s.characteristics?.length ?? 0), 0);
   $('#stat-chars').textContent = chars;
   $('#stat-lastdiag').textContent = state.lastDiagAt ? localTimestamp(state.lastDiagAt) : '—';
+}
+
+/* ================= Compatibilidade do navegador ================= */
+
+/** Matriz de recursos BLE nativos realmente suportados (nada é presumido). */
+function renderCompat() {
+  const box = $('#compat-matrix');
+  const proto = (name, method) =>
+    typeof window[name] === 'function' && method in window[name].prototype;
+
+  const rows = [
+    ['Contexto seguro (HTTPS)', isSecureContext()],
+    ['Web Bluetooth (requestDevice)', typeof navigator.bluetooth?.requestDevice === 'function'],
+    ['Disponibilidade do adaptador (getAvailability)', typeof navigator.bluetooth?.getAvailability === 'function'],
+    ['Dispositivos conhecidos (getDevices)', typeof navigator.bluetooth?.getDevices === 'function'],
+    ['Esquecer permissão (forget)', proto('BluetoothDevice', 'forget')],
+    ['Varredura passiva (requestLEScan)', typeof navigator.bluetooth?.requestLEScan === 'function'],
+    ['Monitorar anúncios (watchAdvertisements)', proto('BluetoothDevice', 'watchAdvertisements')],
+    ['Descritores GATT (getDescriptors)', proto('BluetoothRemoteGATTCharacteristic', 'getDescriptors')],
+    ['Service Worker (PWA offline)', 'serviceWorker' in navigator],
+    ['IndexedDB (histórico local)', !!window.indexedDB],
+    ['Clipboard (copiar HEX/UUID)', !!navigator.clipboard]
+  ];
+
+  box.innerHTML = rows.map(([name, ok]) => `
+    <div class="check-item ${ok ? 'state-ok' : 'state-warn'}">
+      <span class="ico">${ok ? '✓' : '✗'}</span> ${esc(name)}
+      ${ok ? '' : '<span class="badge warn">não suportado</span>'}
+    </div>`).join('');
 }
 
 /* ================= Scanner ================= */
@@ -183,6 +219,12 @@ async function startScan() {
   $('#scan-status').textContent = 'Procurando dispositivos BLE... (o navegador abrirá um seletor de dispositivos)';
   Log.add('Scanner iniciado');
 
+  // Fallback/enriquecimento automático: quando o navegador oferece varredura
+  // passiva, ela é ativada na mesma busca (anúncios reais com RSSI).
+  if (isWebBluetoothSupported() && typeof navigator.bluetooth?.requestLEScan === 'function' && !stopPassiveScanFn) {
+    togglePassiveScan(); // sem await: preserva o gesto do usuário para o seletor
+  }
+
   try {
     const native = await ble.requestDevice(optionalServicesFromSettings());
     const record = addFoundDevice(native);
@@ -208,7 +250,9 @@ async function startScan() {
     state.scanBusy = false;
     $('#btn-scan').disabled = false;
     $('#btn-scan-home').disabled = false;
-    $('#scan-status').textContent = '';
+    $('#scan-status').textContent = stopPassiveScanFn
+      ? 'Varredura passiva ativa (experimental)... dispositivos aparecem na lista abaixo.'
+      : '';
   }
 }
 
@@ -456,6 +500,7 @@ async function connectSelected() {
   const d = state.selected;
   if (!d) return;
   cleanupConnection();
+  state.reconnectAttempts = 0;
   state.connectionError = null;
   setConnectionStatus('Conectando...');
   Log.add('Solicitação GATT');
@@ -487,17 +532,57 @@ async function connectSelected() {
   }
 }
 
-function onGattDisconnected() {
+const RECONNECT_DELAYS = [2000, 5000, 15000]; // backoff (ms), até 3 tentativas
+let userInitiatedDisconnect = false;
+
+async function onGattDisconnected() {
   Log.add('Dispositivo desconectado');
-  toast('Dispositivo desconectado.', 'warn');
   state.connected = false;
   state.server = null;
   cleanupConnection(true);
   renderGatt();
   renderDiagnostic();
+
+  const canReconnect = settings.reconnect && !userInitiatedDisconnect &&
+    state.selected && !state.selected.isDemo && state.nativeDevice;
+
+  if (canReconnect && state.reconnectAttempts < RECONNECT_DELAYS.length) {
+    const attempt = ++state.reconnectAttempts;
+    const delay = RECONNECT_DELAYS[attempt - 1];
+    Log.add(`Reconexão automática em ${delay / 1000}s (tentativa ${attempt}/${RECONNECT_DELAYS.length})`);
+    toast(`Conexão perdida. Reconectando automaticamente (${attempt}/${RECONNECT_DELAYS.length})...`, 'warn');
+    await sleep(delay);
+    // Estado pode ter mudado durante a espera (conexão manual, demo, desconexão desejada).
+    if (userInitiatedDisconnect || state.connected || !state.selected || state.selected.isDemo) return;
+    try {
+      state.server = await ble.connect(state.nativeDevice,
+        Math.max(5, Number(settings.discoverySeconds) || 30) * 1000);
+      state.connected = true;
+      state.nativeDevice.addEventListener('gattserverdisconnected', onGattDisconnected);
+      Log.add('Reconectado automaticamente');
+      toast('Reconectado automaticamente. Redescobrindo serviços...', 'ok');
+      renderGatt();
+      await discoverAndRenderServices();
+    } catch (err) {
+      const e = friendlyError(err);
+      state.connectionError = e.message;
+      Log.add(`Reconexão automática falhou: ${e.message}`);
+      onGattDisconnected(); // nova tentativa (respeita o limite)
+    }
+    return;
+  }
+
+  if (canReconnect) {
+    toast('Não foi possível reconectar automaticamente.', 'err');
+    Log.add('Reconexão automática esgotada');
+  } else if (!userInitiatedDisconnect) {
+    toast('Dispositivo desconectado.', 'warn');
+  }
 }
 
 async function disconnectCurrent() {
+  userInitiatedDisconnect = true;
+  setTimeout(() => { userInitiatedDisconnect = false; }, 5000);
   if (state.selected?.isDemo) {
     // DEMO: apenas cancela notificações.
     state.stopNotifiers.forEach((stop) => stop());
@@ -603,8 +688,39 @@ async function toggleCharacteristics(index) {
   const svcObj = state.server && (await state.server.getPrimaryServices().catch(() => []))
     .find((s) => s.uuid === svc.uuid);
   area.innerHTML = (svc.characteristics || []).map((c, ci) => charBlockHtml(c, index, ci)).join('');
+  if ((svc.characteristics || []).some((c) => c.read)) {
+    area.insertAdjacentHTML('afterbegin',
+      '<div class="row-btns"><button class="btn btn-secondary btn-sm" data-batch-read>📖 Ler todas (READ)</button></div>');
+  }
   area.classList.remove('hidden');
-  bindCharacteristicHandlers(area, svcObj);
+  const chars = await bindCharacteristicHandlers(area, svcObj);
+  const batchBtn = $('[data-batch-read]', area);
+  if (batchBtn && chars?.length) {
+    batchBtn.addEventListener('click', () => batchRead(area, chars));
+  }
+}
+
+/** Leitura em lote de todas as características READ do serviço. */
+async function batchRead(area, chars) {
+  const blocks = $$('.char-block', area);
+  let ok = 0, fail = 0;
+  for (let i = 0; i < chars.length; i++) {
+    const ch = chars[i];
+    const block = blocks[i];
+    if (!ch?.read || !block) continue;
+    const result = $('[data-result]', block);
+    try {
+      const view = await readCharacteristic(ch.object ?? ch);
+      result.innerHTML = dataViewHtml(view, ch.uuid);
+      bindCopyButtons(result);
+      ok++;
+    } catch (err) {
+      fail++;
+      result.innerHTML = `<div class="data-view">Falha na leitura: ${esc(friendlyError(err).message)}</div>`;
+    }
+  }
+  Log.add(`Leitura em lote concluída: ${ok} com sucesso, ${fail} com falha`);
+  toast(`Leitura em lote: ${ok} lida(s), ${fail} com falha.`, fail ? 'warn' : 'ok');
 }
 
 function charBlockHtml(c, svcIndex, ci) {
@@ -633,7 +749,7 @@ function charBlockHtml(c, svcIndex, ci) {
 
 async function bindCharacteristicHandlers(area, svcObj) {
   const blocks = $$('.char-block', area);
-  if (!svcObj) return;
+  if (!svcObj) return null;
   const chars = await getCharacteristics(svcObj).catch(() => []);
 
   blocks.forEach((block, i) => {
@@ -677,6 +793,7 @@ async function bindCharacteristicHandlers(area, svcObj) {
       dBtn.addEventListener('click', () => showDescriptors(result, nativeCh));
     }
   });
+  return chars;
 }
 
 /** Lista descritores GATT da característica (leitura somente quando permitida). */
@@ -972,6 +1089,7 @@ function renderSettingsValues() {
   $('#set-demo').checked = settings.demoMode === true;
   $('#set-refresh').value = settings.refreshSeconds;
   $('#set-timeout').value = settings.discoverySeconds;
+  $('#set-reconnect').checked = settings.reconnect === true;
   $('#set-services').value = settings.optionalServices || '';
 }
 
@@ -1024,6 +1142,10 @@ function bindSettings() {
     const v = Math.min(120, Math.max(5, Number(e.target.value) || 30));
     e.target.value = v;
     settings = Storage.setSetting('discoverySeconds', v);
+  });
+  $('#set-reconnect').addEventListener('change', (e) => {
+    settings = Storage.setSetting('reconnect', e.target.checked);
+    Log.add(`Reconexão automática ${e.target.checked ? 'ativada' : 'desativada'}`);
   });
   $('#set-services').addEventListener('change', (e) => {
     settings = Storage.setSetting('optionalServices', e.target.value);
@@ -1122,6 +1244,10 @@ function bindGlobalEvents() {
   $('#btn-scan-home').addEventListener('click', () => { showScreen('scanner'); startScan(); });
   $('#btn-known').addEventListener('click', loadKnownDevices);
   $('#btn-passive').addEventListener('click', togglePassiveScan);
+  $('#btn-known-home').addEventListener('click', async () => {
+    showScreen('scanner');
+    await loadKnownDevices();
+  });
 
   // Filtros e ordenação do scanner
   $$('#scan-filters .filter-chip').forEach((chip) =>

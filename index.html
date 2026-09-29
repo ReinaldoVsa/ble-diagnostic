@@ -65,6 +65,8 @@
 
         <button id="btn-scan-home" class="btn btn-primary btn-xl">🔍 Procurar dispositivos BLE</button>
 
+        <button id="btn-known-home" class="btn btn-secondary mt">📁 Dispositivos conhecidos</button>
+
         <div class="home-shortcuts">
           <button class="btn btn-secondary" data-screen="devices">📱 Dispositivos</button>
           <button class="btn btn-secondary" data-screen="diagnostic">🧪 Diagnóstico</button>
@@ -242,6 +244,7 @@
             <label class="setting"><span>Modo demonstração (dados DEMO)</span><input type="checkbox" id="set-demo"></label>
             <label class="setting"><span>Intervalo de atualização (s)</span><input type="number" id="set-refresh" min="1" max="60"></label>
             <label class="setting"><span>Tempo de descoberta (s)</span><input type="number" id="set-timeout" min="5" max="120"></label>
+            <label class="setting"><span>Reconexão automática após queda (experimental)</span><input type="checkbox" id="set-reconnect"></label>
           </div>
         </div>
 
@@ -261,13 +264,28 @@
 
         <div class="card">
           <h2 class="card-title">Sobre o aplicativo</h2>
-          <p class="hint">BLE Diagnostic Scanner — versão <b>1.1.0</b></p>
+          <p class="hint">BLE Diagnostic Scanner — versão <b>1.2.0</b></p>
           <p class="hint">Ferramenta de diagnóstico e inventário para dispositivos BLE autorizados. Não executa operações financeiras nem comandos operacionais de caixa eletrônico.</p>
           <div class="row-btns">
             <button class="btn btn-secondary" data-screen="permissions">🔐 Permissões</button>
             <button class="btn btn-secondary" data-screen="privacy">🔒 Privacidade</button>
+            <button class="btn btn-secondary" data-screen="compat">🧪 Compatibilidade</button>
           </div>
         </div>
+      </section>
+
+      <!-- ============ COMPATIBILIDADE ============ -->
+      <section id="screen-compat" class="screen hidden" aria-label="Compatibilidade">
+        <header class="page-head">
+          <h1>Compatibilidade</h1>
+          <p class="subtitle">Recursos BLE suportados por este navegador</p>
+        </header>
+        <div class="card">
+          <h2 class="card-title">Diagnóstico de compatibilidade</h2>
+          <div id="compat-matrix"></div>
+          <p class="hint">Recursos indisponíveis não são simulados: as funções correspondentes informam quando dependem de suporte do navegador.</p>
+        </div>
+        <button class="btn btn-ghost" data-screen="settings">← Voltar</button>
       </section>
 
       <!-- ============ PERMISSÕES ============ -->

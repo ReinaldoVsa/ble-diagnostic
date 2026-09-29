@@ -141,6 +141,7 @@ const DEFAULT_SETTINGS = {
   demoMode: false,        // modo demonstração (dados DEMO)
   refreshSeconds: 2,      // intervalo de atualização do monitor
   discoverySeconds: 30,  // tempo de descoberta/timeout
+  reconnect: false,       // reconexão automática após queda (experimental)
   optionalServices: ''    // UUIDs de serviços autorizados, um por linha
 };
 

@@ -27,6 +27,11 @@ diagnosticar e registrar dispositivos BLE.
 - **Dispositivos conhecidos** (`navigator.bluetooth.getDevices`): reconexão sem abrir o seletor e remoção de permissão (`device.forget`), quando o navegador oferece.
 - **Varredura passiva experimental** (`navigator.bluetooth.requestLEScan`): anúncios em tempo real com RSSI/Tx Power/Manufacturer Data reais, quando o navegador oferece.
 - **Descritores GATT** (dados avançados): listagem e leitura quando permitido pelo dispositivo.
+- **Reconexão automática opcional** após queda de conexão (backoff 2s/5s/15s, até 3 tentativas, apenas dispositivos reais).
+- **Leitura em lote** de todas as características READ de um serviço em um toque.
+- **Acesso rápido a dispositivos conhecidos** direto da tela inicial.
+- **Tela de compatibilidade**: matriz dos recursos BLE que este navegador realmente suporta.
+- **Fallback automático**: "Iniciar busca" também ativa a varredura passiva quando o navegador a oferece.
 - PWA: manifest, service worker, cache versionado, funcionamento offline da interface.
 - Tema dark tecnológico + modo claro opcional. Mobile-first: bottom nav no celular, sidebar no desktop.
 - Modo demonstração (dados identificados como **DEMO**, nunca misturados com dados reais).
@@ -157,4 +162,4 @@ serviços, características, READ, NOTIFY, diagnóstico e exportação.
 
 ## Versão
 
-1.1.0
+1.2.0
