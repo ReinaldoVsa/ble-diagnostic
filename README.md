@@ -197,6 +197,17 @@ O que este bloqueio **não** é:
 - Não protege contra alguém com acesso técnico ao aparelho (devtools);
 - Não substitui autenticação de servidor em cenário algum.
 
+## Testes
+
+Testes unitários sem frameworks (runner nativo do Node, zero dependências):
+
+```bash
+node --test tests/*.test.mjs
+```
+
+- `tests/auth.test.mjs` — fluxo completo do bloqueio local por PIN: validação (4–8 dígitos), registro PBKDF2 (salt + 150.000 iterações, PIN nunca em texto puro), verificação correta/incorreta, substituição, remoção, robustez contra dados corrompidos/adulterados no localStorage e aleatoriedade de salt.
+- Requer Node 18+ (usa `node:test` e a Web Crypto embutida). O `localStorage` é simulado em memória — nada é gravado em disco.
+
 ## Versão
 
 1.3.0
