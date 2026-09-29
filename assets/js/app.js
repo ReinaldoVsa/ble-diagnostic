@@ -20,7 +20,7 @@ import { buildJsonReport, buildTextReport, download } from './export.js';
 import { $, $$, esc, el, toast, confirmModal, badge, kvRows,
          localTimestamp, Log } from './ui.js';
 
-const APP_VERSION = '1.2.0';
+const APP_VERSION = '1.2.1';
 
 /* ================= Estado da sessão ================= */
 
@@ -180,7 +180,10 @@ function renderCompat() {
     ['Descritores GATT (getDescriptors)', proto('BluetoothRemoteGATTCharacteristic', 'getDescriptors')],
     ['Service Worker (PWA offline)', 'serviceWorker' in navigator],
     ['IndexedDB (histórico local)', !!window.indexedDB],
-    ['Clipboard (copiar HEX/UUID)', !!navigator.clipboard]
+    ['Clipboard (copiar HEX/UUID)', !!navigator.clipboard],
+    // Nenhum navegador oferece API de Wi-Fi: detecção/conexão automática
+    // é impossível na PWA e aparece sempre como não suportado (nunca simulada).
+    ['Wi-Fi (detecção/conexão automática)', false]
   ];
 
   box.innerHTML = rows.map(([name, ok]) => `

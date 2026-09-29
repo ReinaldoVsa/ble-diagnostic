@@ -4,7 +4,7 @@
  * versionamento explícito. BLE nunca roda no SW (depende do navegador).
  * ========================================================================= */
 
-const CACHE_VERSION = 'ble-diagnostic-v1.2.0';
+const CACHE_VERSION = 'ble-diagnostic-v1.2.1';
 const APP_SHELL = [
   './',
   './index.html',

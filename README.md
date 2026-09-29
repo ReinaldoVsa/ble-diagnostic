@@ -160,6 +160,26 @@ não criar comandos específicos de ATM e nenhuma função financeira/mecânica.
 funcionalidades Android serão apenas: scanner BLE, conexão GATT, descoberta de
 serviços, características, READ, NOTIFY, diagnóstico e exportação.
 
+## Wi-Fi: por que não há conexão automática nesta PWA
+
+Navegadores **não expõem API alguma** para detectar redes Wi-Fi (nem SSID, nem sinal) nem para conectar. Portanto:
+
+- A PWA não detecta redes e não conecta automaticamente — e **não simula** isso.
+- A tela **Compatibilidade** marca o recurso como "não suportado" em qualquer navegador.
+- Conectar "sem senha" só é possível em **redes abertas**; redes WPA/WPA2/WPA3 exigem a credencial por protocolo.
+
+### Especificação para a versão nativa Android (Kotlin)
+
+| Etapa | API nativa | Observações |
+|---|---|---|
+| Detecção de redes | `WifiManager.startScan()` + `getScanResults()` | Requer `ACCESS_FINE_LOCATION`; Android limita a frequência de scans (throttling). |
+| Conexão automática (Android 10+) | `WifiNetworkSuggestionManager` | O técnico aprova a sugestão uma vez; o sistema conecta automaticamente nas ocorrências seguintes. |
+| Conexão sob demanda (Android 10+) | `WifiNetworkSpecifier` | Diálogo nativo; conecta à rede local, sem internet geral. |
+| Rede aberta (sem senha) | Sugestão de rede `open` | Único caso possível sem credenciais. |
+| WPA/WPA2/WPA3 | Credenciais informadas pelo técnico e salvas criptografadas | Não existe conexão sem a chave — é exigência do protocolo, não do app. |
+
+Restrições inerentes: o Android exige consentimento do usuário (não há conexão invisível a redes novas) e redes protegidas nunca conectam sem credenciais, exceto quando já salvas no sistema.
+
 ## Versão
 
-1.2.0
+1.2.1
