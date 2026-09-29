@@ -1,0 +1,336 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <!-- CSP: nenhum script inline, nenhum recurso externo, nenhum endpoint remoto. -->
+  <meta http-equiv="Content-Security-Policy"
+        content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; manifest-src 'self'; worker-src 'self'; font-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'">
+  <meta name="theme-color" content="#0B1220">
+  <meta name="description" content="Diagnóstico e inventário Bluetooth Low Energy para dispositivos autorizados.">
+  <title>BLE Diagnostic Scanner</title>
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" type="image/png" href="assets/icons/icon-192.png">
+  <link rel="apple-touch-icon" href="assets/icons/icon-192.png">
+  <link rel="stylesheet" href="assets/css/styles.css">
+</head>
+<body>
+  <div id="app">
+
+    <!-- ===== Sidebar (desktop) ===== -->
+    <aside id="sidebar" aria-label="Navegação principal">
+      <div class="brand">
+        <span class="brand-logo" aria-hidden="true">BL</span>
+        <div>
+          <strong>BLE Diagnostic</strong>
+          <small>Scanner</small>
+        </div>
+      </div>
+      <nav class="side-nav">
+        <button class="nav-btn" data-screen="home">🏠 Início</button>
+        <button class="nav-btn" data-screen="scanner">📡 Scanner</button>
+        <button class="nav-btn" data-screen="devices">📱 Dispositivos</button>
+        <button class="nav-btn" data-screen="diagnostic">🧪 Diagnóstico</button>
+        <button class="nav-btn" data-screen="history">📋 Histórico</button>
+        <button class="nav-btn" data-screen="settings">⚙ Configurações</button>
+      </nav>
+      <div class="side-foot">
+        <button id="btn-log-side" class="btn btn-ghost btn-sm">🖥 Log técnico</button>
+      </div>
+    </aside>
+
+    <!-- ===== Conteúdo ===== -->
+    <main id="main">
+
+      <!-- ============ INÍCIO / DASHBOARD ============ -->
+      <section id="screen-home" class="screen" aria-label="Início">
+        <header class="page-head">
+          <h1>BLE Diagnostic Scanner</h1>
+          <p class="subtitle">Diagnóstico e inventário Bluetooth Low Energy</p>
+        </header>
+
+        <div class="chips">
+          <span class="chip" id="chip-bt">Bluetooth: <b id="st-bt">Verificando…</b></span>
+          <span class="chip" id="chip-wb">Web Bluetooth: <b id="st-wb">Verificando…</b></span>
+          <span class="chip" id="chip-https">HTTPS: <b id="st-https">Verificando…</b></span>
+        </div>
+
+        <div class="cards-grid" id="home-cards">
+          <div class="card stat"><p class="stat-label">Dispositivos encontrados</p><p class="stat-value" id="stat-found">0</p></div>
+          <div class="card stat"><p class="stat-label">Dispositivo conectado</p><p class="stat-value" id="stat-connected">—</p></div>
+          <div class="card stat"><p class="stat-label">Serviços GATT encontrados</p><p class="stat-value" id="stat-services">0</p></div>
+          <div class="card stat"><p class="stat-label">Características encontradas</p><p class="stat-value" id="stat-chars">0</p></div>
+          <div class="card stat"><p class="stat-label">Último diagnóstico</p><p class="stat-value stat-sm" id="stat-lastdiag">—</p></div>
+        </div>
+
+        <button id="btn-scan-home" class="btn btn-primary btn-xl">🔍 Procurar dispositivos BLE</button>
+
+        <div class="home-shortcuts">
+          <button class="btn btn-secondary" data-screen="devices">📱 Dispositivos</button>
+          <button class="btn btn-secondary" data-screen="diagnostic">🧪 Diagnóstico</button>
+          <button class="btn btn-secondary" data-screen="history">📋 Histórico</button>
+          <button class="btn btn-secondary" data-screen="settings">⚙ Configurações</button>
+        </div>
+
+        <div class="notice notice-warn" id="sec-notice">
+          ⚠ Use este aplicativo somente em dispositivos BLE que você tenha autorização para diagnosticar.
+        </div>
+      </section>
+
+      <!-- ============ SCANNER ============ -->
+      <section id="screen-scanner" class="screen hidden" aria-label="Scanner BLE">
+        <header class="page-head">
+          <h1>Scanner BLE</h1>
+          <p class="subtitle">Dispositivos próximos anunciados pelo sistema</p>
+        </header>
+
+        <div class="notice" id="wb-hint"></div>
+
+        <button id="btn-scan" class="btn btn-primary btn-xl">Iniciar busca</button>
+        <p id="scan-status" class="scan-status" aria-live="polite"></p>
+
+        <div class="row-btns">
+          <button id="btn-known" class="btn btn-secondary">📁 Dispositivos conhecidos</button>
+          <button id="btn-passive" class="btn btn-secondary hidden">📡 Varredura passiva (experimental)</button>
+        </div>
+        <div id="known-list" class="list"></div>
+
+        <div class="filters" id="scan-filters">
+          <button class="filter-chip active" data-filter="all">Todos</button>
+          <button class="filter-chip" data-filter="strong">Forte sinal</button>
+          <button class="filter-chip" data-filter="medium">Médio sinal</button>
+          <button class="filter-chip" data-filter="weak">Fraco sinal</button>
+          <button class="filter-chip" data-filter="withuuid">Com Service UUID</button>
+          <button class="filter-chip" data-filter="nouuid">Sem Service UUID</button>
+        </div>
+
+        <div class="sort-row">
+          <label for="scan-sort">Ordenar por:</label>
+          <select id="scan-sort">
+            <option value="signal">Sinal</option>
+            <option value="name">Nome</option>
+            <option value="recent">Mais recente</option>
+          </select>
+        </div>
+
+        <div id="scan-list" class="list"></div>
+      </section>
+
+      <!-- ============ DISPOSITIVOS (inventário) ============ -->
+      <section id="screen-devices" class="screen hidden" aria-label="Dispositivos">
+        <header class="page-head">
+          <h1>Dispositivos</h1>
+          <p class="subtitle">Inventário de equipamentos autorizados (cadastro manual)</p>
+        </header>
+
+        <div class="card">
+          <h2 class="card-title">Cadastrar dispositivo</h2>
+          <form id="form-device" autocomplete="off" novalidate>
+            <div class="form-grid">
+              <label>Nome do equipamento *<input name="equipmentName" required maxlength="120"></label>
+              <label>ID interno<input name="internalId" maxlength="80"></label>
+              <label>Fabricante<input name="manufacturer" maxlength="120"></label>
+              <label>Modelo<input name="model" maxlength="120"></label>
+              <label>Número de série<input name="serialNumber" maxlength="120"></label>
+              <label>Unidade<input name="unit" maxlength="120"></label>
+              <label>Localização textual<input name="location" maxlength="200"></label>
+              <label>Service UUID<input name="serviceUuid" placeholder="xxxxxxxx-xxxx-…" maxlength="36"></label>
+              <label class="span-2">Observações<textarea name="notes" rows="2" maxlength="500"></textarea></label>
+            </div>
+            <p class="form-msg" id="device-form-msg" aria-live="polite"></p>
+            <button type="submit" class="btn btn-primary">💾 Salvar dispositivo</button>
+          </form>
+        </div>
+
+        <h2 class="section-title">Dispositivos cadastrados</h2>
+        <div id="device-list" class="list"></div>
+      </section>
+
+      <!-- ============ DETALHES DO DISPOSITIVO ============ -->
+      <section id="screen-device" class="screen hidden" aria-label="Detalhes BLE">
+        <header class="page-head">
+          <h1>Detalhes BLE</h1>
+          <p class="subtitle" id="detail-subtitle"></p>
+        </header>
+        <div id="device-detail"></div>
+      </section>
+
+      <!-- ============ GATT SERVICES ============ -->
+      <section id="screen-gatt" class="screen hidden" aria-label="GATT Services">
+        <header class="page-head">
+          <h1>GATT Services</h1>
+          <p class="subtitle">Serviços descobertos no dispositivo conectado</p>
+        </header>
+        <div id="gatt-connection"></div>
+        <div id="gatt-services" class="list"></div>
+      </section>
+
+      <!-- ============ MONITOR ============ -->
+      <section id="screen-monitor" class="screen hidden" aria-label="Monitor BLE">
+        <header class="page-head">
+          <h1>Monitor BLE</h1>
+          <p class="subtitle">Eventos de notificação em tempo real</p>
+        </header>
+        <div class="row-btns">
+          <button id="btn-monitor-pause" class="btn btn-secondary">⏸ Pausar</button>
+          <button id="btn-monitor-clear" class="btn btn-secondary">🗑 Limpar</button>
+          <button id="btn-monitor-export" class="btn btn-secondary">⬇ Exportar</button>
+        </div>
+        <div id="monitor-list" class="monitor-list" aria-live="polite"></div>
+        <button class="btn btn-ghost mt" data-screen="gatt">← Voltar ao GATT</button>
+      </section>
+
+      <!-- ============ DIAGNÓSTICO ============ -->
+      <section id="screen-diagnostic" class="screen hidden" aria-label="Diagnóstico">
+        <header class="page-head">
+          <h1>Diagnóstico do dispositivo</h1>
+          <p class="subtitle">Checklist da sessão atual e registro do técnico</p>
+        </header>
+
+        <div class="card">
+          <h2 class="card-title">Checklist</h2>
+          <div id="diag-checklist"></div>
+        </div>
+
+        <div class="card">
+          <h2 class="card-title">Registro do diagnóstico</h2>
+          <form id="form-diagnostic" autocomplete="off" novalidate>
+            <div class="form-grid">
+              <label class="span-2">Observações técnicas<textarea name="notes" rows="3" maxlength="2000"></textarea></label>
+              <label>Técnico responsável *<input name="technician" required maxlength="120"></label>
+              <label>Identificação interna<input name="internalId" maxlength="80"></label>
+              <label>Local / unidade<input name="location" maxlength="120"></label>
+              <label>Número patrimonial<input name="assetNumber" maxlength="80"></label>
+              <label>Fabricante<input name="manufacturer" maxlength="120"></label>
+              <label>Modelo<input name="model" maxlength="120"></label>
+              <label>Número de série<input name="serialNumber" maxlength="120"></label>
+            </div>
+            <p class="form-msg" id="diag-form-msg" aria-live="polite"></p>
+            <div class="row-btns">
+              <button type="submit" class="btn btn-primary">💾 Salvar diagnóstico</button>
+              <button type="button" id="btn-export-json" class="btn btn-secondary">⬇ Exportar JSON</button>
+              <button type="button" id="btn-export-report" class="btn btn-secondary">📄 Exportar relatório</button>
+            </div>
+          </form>
+          <p class="hint">Os campos de identificação devem ser preenchidos manualmente pelo técnico autorizado. O aplicativo não infere essas informações a partir do sinal BLE.</p>
+        </div>
+      </section>
+
+      <!-- ============ HISTÓRICO ============ -->
+      <section id="screen-history" class="screen hidden" aria-label="Histórico">
+        <header class="page-head">
+          <h1>Histórico de diagnósticos</h1>
+          <p class="subtitle">Registros salvos localmente (IndexedDB)</p>
+        </header>
+        <div id="history-list" class="list"></div>
+      </section>
+
+      <!-- ============ CONFIGURAÇÕES ============ -->
+      <section id="screen-settings" class="screen hidden" aria-label="Configurações">
+        <header class="page-head">
+          <h1>Configurações</h1>
+          <p class="subtitle">Preferências do aplicativo</p>
+        </header>
+
+        <div class="card">
+          <h2 class="card-title">Preferências</h2>
+          <div class="settings-list">
+            <label class="setting"><span>Tema claro</span><input type="checkbox" id="set-theme"></label>
+            <label class="setting"><span>Mostrar dados avançados</span><input type="checkbox" id="set-advanced"></label>
+            <label class="setting"><span>Mostrar UUIDs completos</span><input type="checkbox" id="set-fulluuid"></label>
+            <label class="setting"><span>Salvar histórico automaticamente</span><input type="checkbox" id="set-autosave"></label>
+            <label class="setting"><span>Modo demonstração (dados DEMO)</span><input type="checkbox" id="set-demo"></label>
+            <label class="setting"><span>Intervalo de atualização (s)</span><input type="number" id="set-refresh" min="1" max="60"></label>
+            <label class="setting"><span>Tempo de descoberta (s)</span><input type="number" id="set-timeout" min="5" max="120"></label>
+          </div>
+        </div>
+
+        <div class="card">
+          <h2 class="card-title">Serviços autorizados conhecidos (UUIDs)</h2>
+          <p class="hint">A Web Bluetooth só permite descobrir serviços declarados aqui ou padrão (Battery 0x180F, Device Information 0x180A). Informe UUIDs de serviços autorizados, um por linha (formato 128 bits ou nome).</p>
+          <textarea id="set-services" rows="3" placeholder="0000180f-0000-1000-8000-00805f9b34fb"></textarea>
+        </div>
+
+        <div class="card">
+          <h2 class="card-title">Dados</h2>
+          <div class="row-btns">
+            <button id="btn-export-data" class="btn btn-secondary">⬇ Exportar dados</button>
+            <button id="btn-clear-history" class="btn btn-danger">🗑 Limpar histórico</button>
+          </div>
+        </div>
+
+        <div class="card">
+          <h2 class="card-title">Sobre o aplicativo</h2>
+          <p class="hint">BLE Diagnostic Scanner — versão <b>1.1.0</b></p>
+          <p class="hint">Ferramenta de diagnóstico e inventário para dispositivos BLE autorizados. Não executa operações financeiras nem comandos operacionais de caixa eletrônico.</p>
+          <div class="row-btns">
+            <button class="btn btn-secondary" data-screen="permissions">🔐 Permissões</button>
+            <button class="btn btn-secondary" data-screen="privacy">🔒 Privacidade</button>
+          </div>
+        </div>
+      </section>
+
+      <!-- ============ PERMISSÕES ============ -->
+      <section id="screen-permissions" class="screen hidden" aria-label="Permissões">
+        <header class="page-head">
+          <h1>Permissões</h1>
+          <p class="subtitle">Por que o aplicativo precisa de cada permissão</p>
+        </header>
+        <div class="card"><h2 class="card-title">Bluetooth</h2><p class="hint">Necessário para procurar e conectar a dispositivos BLE. O acesso é concedido pelo navegador a cada busca, e apenas ao dispositivo que você selecionar.</p></div>
+        <div class="card"><h2 class="card-title">Localização (quando exigida pelo sistema)</h2><p class="hint">Em alguns sistemas (especialmente Android), o sistema operacional exige permissão de localização para varredura Bluetooth, pois anúncios BLE podem indiretamente revelar posição. O aplicativo não usa nem armazena sua localização.</p></div>
+        <div class="card"><h2 class="card-title">Permissão de conexão</h2><p class="hint">Cada conexão GATT é solicitada explicitamente ao navegador. O aplicativo nunca tenta contornar permissões do sistema.</p></div>
+        <button class="btn btn-ghost" data-screen="settings">← Voltar</button>
+      </section>
+
+      <!-- ============ PRIVACIDADE ============ -->
+      <section id="screen-privacy" class="screen hidden" aria-label="Privacidade">
+        <header class="page-head">
+          <h1>Privacidade</h1>
+          <p class="subtitle">Como seus dados são tratados</p>
+        </header>
+        <div class="card">
+          <ul class="privacy-list">
+            <li>Os dados ficam localmente no seu dispositivo, por padrão (IndexedDB).</li>
+            <li>Nenhum dado é enviado para servidor sem implementação explícita e consentimento.</li>
+            <li>O aplicativo não coleta dados bancários.</li>
+            <li>O aplicativo não armazena senhas.</li>
+            <li>O aplicativo não executa operações financeiras.</li>
+          </ul>
+        </div>
+        <button class="btn btn-ghost" data-screen="settings">← Voltar</button>
+      </section>
+
+    </main>
+
+    <!-- ===== Bottom navigation (mobile) ===== -->
+    <nav id="bottomnav" aria-label="Navegação principal">
+      <button class="nav-btn" data-screen="scanner">📡<span>Scanner</span></button>
+      <button class="nav-btn" data-screen="devices">📱<span>Dispositivos</span></button>
+      <button class="nav-btn" data-screen="diagnostic">🧪<span>Diagnóstico</span></button>
+      <button class="nav-btn" data-screen="history">📋<span>Histórico</span></button>
+      <button class="nav-btn" data-screen="settings">⚙<span>Configurações</span></button>
+    </nav>
+  </div>
+
+  <!-- ===== Log técnico ===== -->
+  <button id="btn-log-fab" class="fab" title="Log técnico" aria-label="Abrir log técnico">🖥</button>
+  <div id="log-panel" class="log-panel hidden" role="dialog" aria-label="Log técnico">
+    <div class="log-head">
+      <strong>Log técnico</strong>
+      <div class="row-btns">
+        <button id="btn-log-copy" class="btn btn-ghost btn-sm">Copiar log</button>
+        <button id="btn-log-export" class="btn btn-ghost btn-sm">Exportar</button>
+        <button id="btn-log-clear" class="btn btn-ghost btn-sm">Limpar</button>
+        <button id="btn-log-close" class="btn btn-ghost btn-sm">✕</button>
+      </div>
+    </div>
+    <div id="log-list" class="log-list"></div>
+  </div>
+
+  <!-- ===== Toast e modal ===== -->
+  <div id="toast-container" class="toast-container" aria-live="polite"></div>
+  <div id="modal-root"></div>
+
+  <script type="module" src="assets/js/app.js"></script>
+</body>
+</html>
